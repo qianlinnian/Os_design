@@ -3,6 +3,33 @@
 #include "user/user.h"
 #include "kernel/param.h"
 
+// 去除参数两侧成对的引号（单引号或双引号）
+void strip_quotes(char *s) {
+    int len = strlen(s);
+    if(len >= 2) {
+        if((s[0] == '"' && s[len-1] == '"') || (s[0] == '\'' && s[len-1] == '\'')) {
+            // 向前拷贝
+            memmove(s, s+1, len-2);
+            s[len-2] = 0;
+        }
+    }
+}
+// 将“\n”转译为换行符
+void unescape_newline(char *s) {
+    char *src = s, *dst = s; 
+    while (*src) {
+        if (src[0] == '\\' && src[1] == 'n') {
+            *dst++ = ' ';  // 写入' '
+            src += 2;       // 跳过 \n
+        } else {
+            *dst++ = *src++; // 正常拷贝
+        }
+    }
+    *dst = '\0'; // 结尾加上结束符 
+}
+
+
+
 int main(int argc, char *argv[])
 {
     char buf[512];
@@ -10,13 +37,14 @@ int main(int argc, char *argv[])
     int i;
     int n_flag = 0; // -n选项的值，0表示没有-n选项
     int cmd_start = 1; // 命令开始的索引
-    
+
+
     // 解析命令行参数
     if(argc < 2) {
         fprintf(2, "Usage: xargs [-n num] command [args...]\n");
         exit(1);
     }
-    
+
     // 检查是否有-n选项
     if(argc >= 3 && strcmp(argv[1], "-n") == 0) {
         n_flag = atoi(argv[2]);
@@ -26,40 +54,48 @@ int main(int argc, char *argv[])
             exit(1);
         }
     }
-    
+
     // 复制命令行参数到args数组
     int base_arg_count = 0;
     for(i = cmd_start; i < argc; i++) {
         args[base_arg_count++] = argv[i];
     }
-    
+
     // 逐行处理标准输入
     int buf_pos = 0;
     char c;
-    
+
     while(read(0, &c, 1) == 1) {
         if(c == '\n') {
             // 处理一行输入
             buf[buf_pos] = 0; // 字符串结束符
-            
+
             // 跳过空行
             if(buf_pos == 0) {
                 buf_pos = 0;
                 continue;
             }
-            
+
+             // 对每个输入参数做 unescape_newline
+            for(int x = 0; x < buf_pos; x++) {
+                //printf("处理前 %s\n ", buf);
+                strip_quotes(buf);
+                unescape_newline(buf);
+                //printf("处理后 %s\n ", buf);
+            }
+
             // 将输入行按空格分割
             char *input_args[MAXARG];
             int input_count = 0;
-            
+
             char *p = buf;
             while(*p && input_count < MAXARG - base_arg_count - 1) {
                 // 跳过前导空格
                 while(*p == ' ' || *p == '\t') p++;
                 if(*p == 0) break;
-                
+
                 input_args[input_count++] = p;
-                
+
                 // 找到下一个空格或字符串结尾
                 while(*p && *p != ' ' && *p != '\t') p++;
                 if(*p) {
@@ -67,7 +103,8 @@ int main(int argc, char *argv[])
                     p++;
                 }
             }
-            
+           
+
             // 根据-n选项决定如何执行
             if(n_flag > 0) {
                 // 有-n选项，按指定数量分组执行
@@ -78,7 +115,7 @@ int main(int argc, char *argv[])
                         args[arg_count++] = input_args[k];
                     }
                     args[arg_count] = 0;
-                    
+
                     // fork并执行
                     if(fork() == 0) {
                         exec(args[0], args);
@@ -95,7 +132,7 @@ int main(int argc, char *argv[])
                     args[arg_count++] = input_args[j];
                 }
                 args[arg_count] = 0;
-                
+
                 // fork并执行
                 if(fork() == 0) {
                     exec(args[0], args);
@@ -105,7 +142,7 @@ int main(int argc, char *argv[])
                     wait(0);
                 }
             }
-            
+
             buf_pos = 0; // 重置缓冲区
         } else {
             // 将字符添加到缓冲区
@@ -114,6 +151,6 @@ int main(int argc, char *argv[])
             }
         }
     }
-    
+
     exit(0);
 }
