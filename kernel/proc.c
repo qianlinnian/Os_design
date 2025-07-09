@@ -309,6 +309,7 @@ fork(void)
 
   acquire(&wait_lock);
   np->parent = p;
+  np->trace_mask = p->trace_mask;
   release(&wait_lock);
 
   acquire(&np->lock);
