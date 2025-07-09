@@ -104,6 +104,7 @@ extern uint64 sys_unlink(void);
 extern uint64 sys_wait(void);
 extern uint64 sys_write(void);
 extern uint64 sys_uptime(void);
+extern uint64 sys_trace(void);
 
 static uint64 (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -127,6 +128,7 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_trace]   sys_trace,
 };
 
 static char *syscall_names[] = {
@@ -155,20 +157,23 @@ static char *syscall_names[] = {
 };
 
 void
-syscall(void){
+syscall(void)
+{
   int num;
   struct proc *p = myproc();
 
   num = p->trapframe->a7;
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     p->trapframe->a0 = syscalls[num]();
+    
+    // 只有在有效的系统调用执行后才检查 trace
+    if((p->trace_mask & (1 << num)) != 0) {
+      printf("%d: syscall %s -> %d\n", p->pid, syscall_names[num], p->trapframe->a0);
+    }
   } else {
     printf("%d %s: unknown sys call %d\n",
             p->pid, p->name, num);
     p->trapframe->a0 = -1;
   }
-  int ret = p->trapframe->a0;
-  if (p->trace_mask & (1 << num)) {
-    printf("%d: syscall %s -> %d\n", p->pid, syscall_names[num], ret);
-  }
 }
+

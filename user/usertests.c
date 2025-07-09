@@ -1006,9 +1006,10 @@ forkforkfork(char *s)
       }
       if(fork() < 0){
         close(open("stopforking", O_CREATE|O_RDWR));
+        exit(0); 
       }
     }
-
+    printf("forkforkfork退出\n");
     exit(0);
   }
 
