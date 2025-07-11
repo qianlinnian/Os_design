@@ -79,8 +79,18 @@ sys_sleep(void)
 #ifdef LAB_PGTBL
 int
 sys_pgaccess(void)
-{
-  // lab pgtbl: your code here.
+{ 
+  uint64 base;
+  int len;
+  uint64 mask;
+  if(argaddr(0, &base) < 0)
+    return -1;
+  if(argint(1, &len) < 0)
+    return -1;
+  if(argaddr(2, &mask) < 0)
+    return -1;
+    
+  return pgaccess(base, len, mask);
   return 0;
 }
 #endif
@@ -107,3 +117,4 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+ 

@@ -3,6 +3,8 @@
 #include "memlayout.h"
 #include "elf.h"
 #include "riscv.h"
+#include "spinlock.h"
+#include "proc.h"
 #include "defs.h"
 #include "fs.h"
 
@@ -463,3 +465,36 @@ vmprint(pagetable_t pagetable)
   printf("page table %p\n", pagetable);
   vmprint_recursive(pagetable, 0);
 }
+
+
+#ifdef LAB_PGTBL
+int
+pgaccess(uint64 base, int len, uint64 mask)
+{
+  struct proc *p = myproc();
+  uint64 result = 0;
+  
+  // 检查参数有效性
+  if(len > 64) return -1;  // 最多64页
+  
+  for(int i = 0; i < len; i++){
+    uint64 va = base + i * PGSIZE;
+    pte_t *pte = walk(p->pagetable, va, 0);
+    
+    if(pte == 0) continue;  // 页面不存在
+    if((*pte & PTE_V) == 0) continue;  // 页面无效
+    
+    // 检查访问位
+    if(*pte & PTE_A){
+      result |= (1L << i);  // 设置对应位
+      *pte &= ~PTE_A;       // 清除访问位
+    }
+  }
+  
+  // 将结果复制到用户空间
+  if(copyout(p->pagetable, mask, (char*)&result, sizeof(result)) < 0)
+    return -1;
+    
+  return 0;
+}
+#endif
