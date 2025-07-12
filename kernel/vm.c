@@ -80,8 +80,9 @@ kvminithart()
 pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
-  if(va >= MAXVA)
+  if(va >= MAXVA){
     panic("walk");
+  }
 
   for(int level = 2; level > 0; level--) {
     pte_t *pte = &pagetable[PX(level, va)];
@@ -148,8 +149,10 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   for(;;){
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
-    if(*pte & PTE_V)
+    if(*pte & PTE_V){
+      printf("va = %p,pa = %p,oripa = %p\n",va,pa,PTE2PA(*pte));
       panic("mappages: remap");
+    }
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
       break;
@@ -302,17 +305,17 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
   uint64 pa, i;
-  uint flags; 
+  uint flags;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
-    pa = PTE2PA(*pte);    
+    pa = PTE2PA(*pte); 
     *pte = (*pte & ~PTE_W) | PTE_C;
     flags = PTE_FLAGS(*pte);
-
+    
     if(mappages(new, i, PGSIZE, pa, flags) != 0)
       goto err;
     add_rc(pa);
@@ -348,21 +351,21 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     if(va0 >= MAXVA)
-      return -1;
+        return -1;
     pte = walk(pagetable, va0, 0);
     if(pte == 0)
-      return -1;
+        return -1;
     pa0 = PTE2PA(*pte);
     flag = PTE_FLAGS(*pte);
 
     if(flag & PTE_C){
-      char *mem = kalloc();
-      if(mem == 0)
-        return -1;
-      memmove(mem, (char*)pa0, PGSIZE);
-      kfree((char*)pa0);
-      *pte = PA2PTE(mem) | (flag & ~PTE_C) | PTE_W;
-      pa0 = (uint64)mem;
+        char *mem = kalloc();
+        if(mem == 0)
+            return -1;
+        memmove(mem, (char*)pa0, PGSIZE);
+        kfree((char*)pa0);
+        *pte = PA2PTE((uint64)mem) | (flag & ~PTE_C) | PTE_W;
+        pa0 = (uint64)mem;
     }
     if(pa0 == 0)
       return -1;
