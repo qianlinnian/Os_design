@@ -132,3 +132,22 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+void
+backtrace(void)
+{
+  uint64 fp = r_fp(); // 当前帧指针
+  uint64 stack_top = PGROUNDUP(fp);     // 当前栈页顶部
+  uint64 stack_bottom = PGROUNDDOWN(fp); // 当前栈页底部
+
+  printf("backtrace:\n");
+  // 每个栈帧结构：
+  // [fp - 8]  -> 返回地址  [fp - 16] -> 上一个帧指针
+
+  while (fp != 0 && fp >= stack_bottom && fp + 16 <= stack_top) {
+    uint64 ra = *((uint64 *)(fp - 8));    // 取出返回地址
+    printf("%p\n", (void*)ra);
+
+    fp = *((uint64 *)(fp - 16));          // 取出上一个帧指针
+  }
+}

@@ -1,0 +1,84 @@
+(1)Which registers contain arguments to functions? For example, which register holds 13 in main's call to printf?
+哪些寄存器包含函数的参数？比如，在 main 调用 printf 时，哪个寄存器保存了 13？
+
+    a0	第1个参数
+    a1	第2个参数
+    a2	第3个参数   
+    a3	第4个参数
+    a4	第5个参数
+    a5	第6个参数
+    a6	第7个参数
+    a7	第8个参数
+
+  24:	4635                	li	a2,13
+    13保存在a2中。
+
+(2)Where is the call to function f in the assembly code for main? Where is the call to g? (Hint: the compiler may inline functions.)
+在 main 的汇编代码中，调用函数 f 的位置在哪里？调用 g 的位置在哪里？（提示：编译器可能会内联函数。）
+Main中没有调用f和g的位置。
+因为编译器进行了完全内联优化：编译器在编译时就计算出了 f(8)+1 的结果，计算时候直接加载了常数。
+
+(3)At what address is the function printf located?
+函数 printf 位于哪个地址？
+源代码：
+  printf("%d %d\n", f(8)+1, 13);
+  24:	4635                	li	a2,13
+  26:	45b1                	li	a1,12
+  28:	00000517          	auipc	a0,0x0
+  2c:	7a850513          	addi	a0,a0,1960 # 7d0 <malloc+0x102>
+  30:	00000097          	auipc	ra,0x0
+  34:	5e6080e7          	jalr	1510(ra) # 616 <printf>
+分析：
+    auipc ra,0x0 (地址 0x30)：将当前PC值加载到 ra 寄存器：PC = 0x30，所以 ra = 0x30
+    jalr 1510(ra) (地址 0x34)：1510 是十进制，转换为十六进制：1510₁₀ = 0x5e6₁₆  
+    跳转地址 = ra + 0x5e6 = 0x30 + 0x5e6 = 0x616
+    所以printf位于地址0x616
+
+
+(4)What value is in the register ra just after the jalr to printf in main?
+在 main 中执行 jalr 到 printf 之后，寄存器 ra 中的值是多少？
+
+源代码：    
+    
+  34:	5e6080e7          	jalr	1510(ra) # 616 <printf>
+分析：
+    jalr 指令执行时会： 
+    保存返回地址：将下一条指令的地址保存到 ra 寄存器
+    跳转：跳转到目标地址（printf）
+    jalr 指令位于地址：0x34
+    jalr 指令执行之后的下一条指令地址：0x34 + 4 = 0x38  
+    这个地址 0x38 就是 li a0,0 指令的位置
+    ra寄存器中的值是 0x38。
+
+(5)执行代码
+代码：
+  34:	5e6080e7          	jalr	1510(ra) # 616 <printf>
+输出：
+    H%x部分：
+    57616 转换为十六进制：57616₁₀ = E110₁₆		输出：HE110
+    Wo%s部分：
+    &i 指向内存中的字节序列
+    在 Little-Endian 系统中，0x00646c72 在内存中存储为：
+    低地址 → 高地址72 6c 64 00
+    作为字符串读取：
+    0x72 = 'r'	0x6c = 'l'	0x64 = 'd'	0x00 = '\0' (字符串结束符)
+    输出：World (实际上是 "rld")
+
+    如果系统是 Big-Endian，要得到相同的输出：
+    1. 修改变量 i： 
+    unsigned int i = 0x726c6400;  // 需要改变   
+    原因：Big-Endian 按高位字节在前存储
+    0x726c6400 在 Big-Endian 内存中存储为：低地址 → 高地址  72 6c 64 00
+    这样 %s 仍然能读到 "rld\0"
+    2. 数值 57616 不需要改变：
+    57616 的十六进制表示 E110 不受字节序影响
+    %x 格式化输出的是数值本身，不是内存字节序
+
+(6)n the following code, what is going to be printed after 'y='? (note: the answer is not a specific value.) Why does this happen?
+在下面的代码中，'y=' 之后将打印什么？ （注意：答案不是具体值。 为什么会这样？
+输出：
+    $ call
+    x=3 y=7285$ 
+
+答案：y= 后面打印的是未初始化变量的垃圾值。
+原因：变量 y 没有被正确初始化，所以它包含了栈内存中的随机数据。这是一个典型的编程错误，应该在使用变量前先初始化它。

@@ -11,7 +11,8 @@ int f(int x) {
   return g(x);
 }
 
-void main(void) {
-  printf("%d %d\n", f(8)+1, 13);
+void main(void) { 
+  printf("x=%d y=%d", 3);
+  
   exit(0);
 }
