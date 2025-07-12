@@ -17,6 +17,16 @@ extern char end[]; // first address after kernel.
 struct run {
   struct run *next;
 };
+static int reference_count[(PHYSTOP - 0x80000000) / PGSIZE];
+static int idx_rc(uint64 pa){
+  return (pa - 0x80000000) / PGSIZE;
+}
+void add_rc(uint64 pa){
+  reference_count[idx_rc(pa)]++;
+}   
+void sub_rc(uint64 pa){
+  reference_count[idx_rc(pa)]--;
+}   
 
 struct {
   struct spinlock lock;
@@ -27,8 +37,9 @@ void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  memset(reference_count,0,sizeof(reference_count));
   freerange(end, (void*)PHYSTOP);
-}
+} 
 
 void
 freerange(void *pa_start, void *pa_end)
@@ -47,10 +58,13 @@ void
 kfree(void *pa)
 {
   struct run *r;
-
+  
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
-
+  if(reference_count[idx_rc((uint64)pa)] > 1){
+      sub_rc((uint64)pa);
+      return;
+  }   
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -60,6 +74,7 @@ kfree(void *pa)
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);
+  reference_count[idx_rc((uint64)pa)] = 0;
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -78,5 +93,10 @@ kalloc(void)
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
-  return (void*)r;
+
+  if(r)
+    reference_count[idx_rc((uint64)r)] = 1;
+  return (void*)r; 
 }
+
+
