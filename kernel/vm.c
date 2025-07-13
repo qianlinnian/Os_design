@@ -315,9 +315,9 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     pa = PTE2PA(*pte); 
     *pte = (*pte & ~PTE_W) | PTE_C;
     flags = PTE_FLAGS(*pte);
-    
-    if(mappages(new, i, PGSIZE, pa, flags) != 0)
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
+    }
     add_rc(pa);
   }
   return 0;
@@ -357,11 +357,11 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
         return -1;
     pa0 = PTE2PA(*pte);
     flag = PTE_FLAGS(*pte);
-
     if(flag & PTE_C){
         char *mem = kalloc();
-        if(mem == 0)
+        if(mem == 0){
             return -1;
+        }
         memmove(mem, (char*)pa0, PGSIZE);
         kfree((char*)pa0);
         *pte = PA2PTE((uint64)mem) | (flag & ~PTE_C) | PTE_W;

@@ -13,11 +13,8 @@ void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
-
-struct run {
-  struct run *next;
-};
 static int reference_count[(PHYSTOP - 0x80000000) / PGSIZE];
+
 static int idx_rc(uint64 pa){
   return (pa - 0x80000000) / PGSIZE;
 }
@@ -28,6 +25,10 @@ void sub_rc(uint64 pa){
   reference_count[idx_rc(pa)]--;
 }   
 
+struct run {
+  struct run *next;
+};
+//struct spinlock ref_count_lock;
 struct {
   struct spinlock lock;
   struct run *freelist;
@@ -98,5 +99,3 @@ kalloc(void)
     reference_count[idx_rc((uint64)r)] = 1;
   return (void*)r; 
 }
-
-
