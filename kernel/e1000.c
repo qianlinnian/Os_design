@@ -147,7 +147,7 @@ e1000_intr(void)
   // tell the e1000 we've seen this interrupt;
   // without this the e1000 won't raise any
   // further interrupts.
-  printf("e1000_intr: begin\n");
+//  printf("e1000_intr: begin\n");  //这个输出会导致报错
   regs[E1000_ICR] = 0xffffffff;
 
   e1000_recv();
