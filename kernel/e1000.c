@@ -95,35 +95,105 @@ e1000_init(uint32 *xregs)
 int
 e1000_transmit(struct mbuf *m)
 {
-  //
-  // Your code here.
-  //
-  // the mbuf contains an ethernet frame; program it into
-  // the TX descriptor ring so that the e1000 sends it. Stash
-  // a pointer so that it can be freed after sending.
-  //
+  acquire(&e1000_lock);
+  printf("e1000_transmit: begin\n");
+  // 获取当前发送队列尾指针
+  uint32 tdt = regs[E1000_TDT];
   
-  return 0;
+  // 检查描述符是否可用 (DD bit = 1 表示可用)
+  if (!(tx_ring[tdt].status & E1000_TXD_STAT_DD)) {
+    // 队列满，无法发送
+    release(&e1000_lock);
+    printf("e1000_transmit: TX ring full\n");
+    return -1;
+  }
+  
+  // 释放之前可能存在的mbuf
+  if (tx_mbufs[tdt]) {
+    mbuffree(tx_mbufs[tdt]);
+  }
+  
+  // 填充发送描述符
+  tx_ring[tdt].addr = (uint64)m->head;           // 数据缓冲区地址
+  tx_ring[tdt].length = m->len;                  // 数据长度
+  tx_ring[tdt].cso = 0;                          // 校验和偏移
+  tx_ring[tdt].cmd = E1000_TXD_CMD_EOP |         // End of Packet
+                     E1000_TXD_CMD_RS;           // Report Status
+  tx_ring[tdt].status = 0;                       // 清除状态位
+  tx_ring[tdt].css = 0;                          // 校验和起始
+  
+  // 保存mbuf指针，用于后续释放
+  tx_mbufs[tdt] = m;
+  
+  // 更新队列尾指针，通知硬件有新的数据包要发送
+  regs[E1000_TDT] = (tdt + 1) % TX_RING_SIZE;
+  
+  release(&e1000_lock);
+  printf("e1000_transmit: packet sent, TDT updated to %d\n", regs[E1000_TDT]);  
+  return 0;  // 发送成功
 }
-
 static void
 e1000_recv(void)
 {
-  //
-  // Your code here.
-  //
-  // Check for packets that have arrived from the e1000
-  // Create and deliver an mbuf for each packet (using net_rx()).
-  //
+  acquire(&e1000_lock);
+  
+  // 处理所有可用的接收数据包
+  while (1) {
+    // 计算下一个要处理的描述符索引
+    uint32 rdt = regs[E1000_RDT];
+    uint32 next = (rdt + 1) % RX_RING_SIZE;
+    
+    // 检查描述符是否有新数据
+    if (!(rx_ring[next].status & E1000_RXD_STAT_DD)) {
+      break;  // 没有更多数据包
+    }
+    
+    // 获取接收到的mbuf
+    struct mbuf *m = rx_mbufs[next];
+    if (!m) {
+      panic("e1000_recv: no mbuf");
+    }
+    
+    // 设置接收数据的长度
+    m->len = rx_ring[next].length;
+    
+    // 将数据包传递给网络栈
+    net_rx(m);
+    
+    // 分配新的mbuf用于下次接收
+    rx_mbufs[next] = mbufalloc(0);
+    if (!rx_mbufs[next]) {
+      panic("e1000_recv: mbufalloc failed");
+    }
+    
+    // 重新设置接收描述符
+    rx_ring[next].addr = (uint64)rx_mbufs[next]->head;
+    rx_ring[next].status = 0;  // 清除状态位
+    
+    // 更新队列尾指针，告诉硬件有新的缓冲区可用
+    regs[E1000_RDT] = next;
+  }
+  
+  release(&e1000_lock);
 }
-
 void
 e1000_intr(void)
 {
-  // tell the e1000 we've seen this interrupt;
-  // without this the e1000 won't raise any
-  // further interrupts.
+  // 读取中断原因寄存器
+  uint32 icr = regs[E1000_ICR];
+  
+  // 检查是否是接收中断
+  if (icr & E1000_ICR_RXT0) {
+    e1000_recv();
+  }
+  
+  // 检查是否有其他中断类型
+  if (icr & E1000_ICR_TXDW) {
+    // 发送完成中断 - 通常不需要特殊处理
+  }
+  
+  printf("e1000_intr: begin\n");
   regs[E1000_ICR] = 0xffffffff;
 
   e1000_recv();
-}
+} 
