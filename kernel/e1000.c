@@ -19,7 +19,8 @@ static struct mbuf *rx_mbufs[RX_RING_SIZE];
 // remember where the e1000's registers live.
 static volatile uint32 *regs;
 
-struct spinlock e1000_lock;
+struct spinlock e1000_tlock;
+struct spinlock e1000_rlock;
 
 // called by pci_init().
 // xregs is the memory address at which the
@@ -29,7 +30,8 @@ e1000_init(uint32 *xregs)
 {
   int i;
 
-  initlock(&e1000_lock, "e1000");
+  initlock(&e1000_tlock, "e1000_tlock");
+  initlock(&e1000_rlock, "e1000_rlock");
 
   regs = xregs;
 
@@ -95,87 +97,50 @@ e1000_init(uint32 *xregs)
 int
 e1000_transmit(struct mbuf *m)
 {
-  acquire(&e1000_lock);
-  printf("e1000_transmit: begin\n");
-  // 获取当前发送队列尾指针
-  uint32 tdt = regs[E1000_TDT];
-  
-  // 检查描述符是否可用 (DD bit = 1 表示可用)
-  if (!(tx_ring[tdt].status & E1000_TXD_STAT_DD)) {
-    // 队列满，无法发送
-    release(&e1000_lock);
-    printf("e1000_transmit: TX ring full\n");
+  acquire(&e1000_tlock);
+  uint32 tail = regs[E1000_TDT];
+  if(!(tx_ring[tail].status & E1000_TXD_STAT_DD)){
+    release(&e1000_tlock);
     return -1;
   }
-  
-  // 释放之前可能存在的mbuf
-  if (tx_mbufs[tdt]) {
-    mbuffree(tx_mbufs[tdt]);
-  }
-  
-  // 填充发送描述符
-  tx_ring[tdt].addr = (uint64)m->head;           // 数据缓冲区地址
-  tx_ring[tdt].length = m->len;                  // 数据长度
-  tx_ring[tdt].cso = 0;                          // 校验和偏移
-  tx_ring[tdt].cmd = E1000_TXD_CMD_EOP |         // End of Packet
-                     E1000_TXD_CMD_RS;           // Report Status
-  tx_ring[tdt].status = 0;                       // 清除状态位
-  tx_ring[tdt].css = 0;                          // 校验和起始
-  
-  // 保存mbuf指针，用于后续释放
-  tx_mbufs[tdt] = m;
-  
-  // 更新队列尾指针，通知硬件有新的数据包要发送
-  regs[E1000_TDT] = (tdt + 1) % TX_RING_SIZE;
-  
-  release(&e1000_lock);
-  printf("e1000_transmit: packet sent, TDT updated to %d\n", regs[E1000_TDT]);  
-  return 0;  // 发送成功
+  if(tx_mbufs[tail])
+    mbuffree(tx_mbufs[tail]);
+  tx_ring[tail].addr = (uint64)m->head;
+  tx_ring[tail].length = (uint16)m->len;
+  tx_ring[tail].cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
+  tx_mbufs[tail] = m;
+  regs[E1000_TDT] = (tail+1) % TX_RING_SIZE;
+  release(&e1000_tlock);
+  return 0;
 }
+
 static void
 e1000_recv(void)
 {
-  acquire(&e1000_lock);
-  
-  // 处理所有可用的接收数据包
-  while (1) {
-    // 计算下一个要处理的描述符索引
-    uint32 rdt = regs[E1000_RDT];
-    uint32 next = (rdt + 1) % RX_RING_SIZE;
-    
-    // 检查描述符是否有新数据
-    if (!(rx_ring[next].status & E1000_RXD_STAT_DD)) {
-      break;  // 没有更多数据包
+  struct mbuf *newmbuf;
+  acquire(&e1000_rlock); 
+  uint32 tail = regs[E1000_RDT];
+  uint32 curr = (tail + 1) % RX_RING_SIZE;
+  while(1){
+    if(!(rx_ring[curr].status & E1000_RXD_STAT_DD)){
+      break;
     }
-    
-    // 获取接收到的mbuf
-    struct mbuf *m = rx_mbufs[next];
-    if (!m) {
-      panic("e1000_recv: no mbuf");
-    }
-    
-    // 设置接收数据的长度
-    m->len = rx_ring[next].length;
-    
-    // 将数据包传递给网络栈
-    net_rx(m);
-    
-    // 分配新的mbuf用于下次接收
-    rx_mbufs[next] = mbufalloc(0);
-    if (!rx_mbufs[next]) {
-      panic("e1000_recv: mbufalloc failed");
-    }
-    
-    // 重新设置接收描述符
-    rx_ring[next].addr = (uint64)rx_mbufs[next]->head;
-    rx_ring[next].status = 0;  // 清除状态位
-    
-    // 更新队列尾指针，告诉硬件有新的缓冲区可用
-    regs[E1000_RDT] = next;
+    rx_mbufs[curr]->len = rx_ring[curr].length;
+    net_rx(rx_mbufs[curr]);
+    tail = curr;
+    newmbuf = mbufalloc(0);
+    rx_mbufs[curr] = newmbuf;
+    rx_ring[curr].addr = (uint64)newmbuf->head;
+    rx_ring[curr].status = 0;
+    regs[E1000_RDT] = curr;
+    curr = (curr + 1) % RX_RING_SIZE;
   }
-  
-  release(&e1000_lock);
+  regs[E1000_RDT] = tail;
+  release(&e1000_rlock);
 }
+
+
+
 void
 e1000_intr(void)
 {
