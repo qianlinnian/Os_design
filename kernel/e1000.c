@@ -179,19 +179,9 @@ e1000_recv(void)
 void
 e1000_intr(void)
 {
-  // 读取中断原因寄存器
-  uint32 icr = regs[E1000_ICR];
-  
-  // 检查是否是接收中断
-  if (icr & E1000_ICR_RXT0) {
-    e1000_recv();
-  }
-  
-  // 检查是否有其他中断类型
-  if (icr & E1000_ICR_TXDW) {
-    // 发送完成中断 - 通常不需要特殊处理
-  }
-  
+  // tell the e1000 we've seen this interrupt;
+  // without this the e1000 won't raise any
+  // further interrupts.
   printf("e1000_intr: begin\n");
   regs[E1000_ICR] = 0xffffffff;
 
