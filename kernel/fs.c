@@ -379,7 +379,7 @@ bmap(struct inode *ip, uint bn)
 {
   uint addr, *a;
   struct buf *bp;
-
+  //处理直接块的
   if(bn < NDIRECT){
     if((addr = ip->addrs[bn]) == 0)
       ip->addrs[bn] = addr = balloc(ip->dev);
@@ -400,7 +400,33 @@ bmap(struct inode *ip, uint bn)
     brelse(bp);
     return addr;
   }
+  bn -= NINDIRECT;
+  //处理双重简洁块
+  if(bn < NDINDIRECT){
+    // 加载双重间接块
+    if((addr = ip->addrs[NDIRECT+1]) == 0)
+      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    //计算二级索引 
+    uint first_level =bn / NINDIRECT;
+    uint second_level = bn % NINDIRECT;
+    if((addr = a[first_level]) == 0){
+      a[first_level] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
 
+    // 加载第一级间接块，获取最终数据块
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if((addr = a[second_level]) == 0){
+      a[second_level] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+    return addr;
+  }
   panic("bmap: out of range");
 }
 
@@ -410,16 +436,16 @@ void
 itrunc(struct inode *ip)
 {
   int i, j;
-  struct buf *bp;
-  uint *a;
-
+  struct buf *bp, *bp2;
+  uint *a, *a2;
+  //释放直接块
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
       bfree(ip->dev, ip->addrs[i]);
       ip->addrs[i] = 0;
     }
   }
-
+  //释放一级间接块
   if(ip->addrs[NDIRECT]){
     bp = bread(ip->dev, ip->addrs[NDIRECT]);
     a = (uint*)bp->data;
@@ -431,7 +457,30 @@ itrunc(struct inode *ip)
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
   }
-
+  //释放二级间接块
+  if(ip->addrs[NDIRECT+1]){
+    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    a = (uint*)bp->data;
+    for(i = 0; i < NINDIRECT; i++){
+      if(a[i]){
+        //加载第一级间接块
+        bp2 = bread(ip->dev, a[i]);
+        a2 = (uint*)bp2->data;
+        //释放第二级数据块
+        for(j = 0; j < NINDIRECT; j++){
+          if(a2[j])
+            bfree(ip->dev, a2[j]);
+        }
+        brelse(bp2);
+        // 释放第一级间接块
+        bfree(ip->dev, a[i]);
+      }
+    }
+    brelse(bp);
+    // 释放二级间接块
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
+    ip->addrs[NDIRECT+1] = 0;
+  }
   ip->size = 0;
   iupdate(ip);
 }
