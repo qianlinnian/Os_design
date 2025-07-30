@@ -348,15 +348,7 @@ sys_open(void)
         return -1;
     }
     ilock(ip);
-
-    // 处理符号链接跟随
-    if(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)){
-      if((ip = follow_symlink(ip)) == 0){
-        end_op();
-        return -1;
-      }
-      // follow_symlink 返回的 ip 已经是 locked 的
-    } 
+ 
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
       end_op();
@@ -372,9 +364,7 @@ sys_open(void)
 
   // handle the symlink - lab 9.2
   if(ip->type == T_SYMLINK && (omode & O_NOFOLLOW) == 0) {
-    if((ip = follow_symlink(ip)) == 0) {
-      // 此处不用调用iunlockput()释放锁
-      // follow_symlinktest()返回失败时,锁在函数内已经被释放
+    if((ip = follow_symlink(ip)) == 0) { 
       end_op();
       return -1;
     }
