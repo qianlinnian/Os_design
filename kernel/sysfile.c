@@ -16,6 +16,11 @@
 #include "file.h"
 #include "fcntl.h"
 
+
+//函数声明
+struct inode* follow_symlink(struct inode *ip);
+uint64 sys_symlink(void);
+
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
 static int
@@ -296,19 +301,28 @@ sys_open(void)
     return -1;
 
   begin_op();
-
+  // 首先尝试查找文件
   if(omode & O_CREATE){
     ip = create(path, T_FILE, 0, 0);
     if(ip == 0){
-      end_op();
-      return -1;
+        end_op();
+        return -1;
     }
   } else {
     if((ip = namei(path)) == 0){
-      end_op();
-      return -1;
+        end_op();
+        return -1;
     }
     ilock(ip);
+
+    // 处理符号链接跟随
+    if(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)){
+      if((ip = follow_symlink(ip)) == 0){
+        end_op();
+        return -1;
+      }
+      // follow_symlink 返回的 ip 已经是 locked 的
+    } 
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
       end_op();
@@ -321,6 +335,7 @@ sys_open(void)
     end_op();
     return -1;
   }
+
 
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
     if(f)
@@ -483,4 +498,77 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+uint64
+sys_symlink(void)
+{
+    char target[MAXPATH], path[MAXPATH];
+    struct inode *ip;
+    int target_len;
+
+    if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+        return -1;
+
+    begin_op();
+
+    // 创建新的符号链接 inode
+    if((ip = create(path, T_SYMLINK, 0, 0)) == 0){
+        end_op();
+        return -1;
+    }
+
+    // 计算目标路径长度
+    target_len = strlen(target);
+    
+    // 将目标路径写入 inode 的数据块
+    if(writei(ip, 0, (uint64)target, 0, target_len) != target_len){
+        iunlockput(ip);
+        end_op();
+        return -1;
+    }
+
+    iunlockput(ip);
+    end_op();
+    return 0;
+}
+
+#define MAX_SYMLINK_DEPTH 10
+
+struct inode*
+follow_symlink(struct inode *ip)
+{
+    char target[MAXPATH];
+    struct inode *next;
+    int depth = 0;
+    int n;
+
+    while(ip && ip->type == T_SYMLINK && depth < MAX_SYMLINK_DEPTH){
+        // 读取符号链接的目标路径
+        if((n = readi(ip, 0, (uint64)target, 0, MAXPATH-1)) <= 0){
+            iunlockput(ip);
+            return 0;
+        }
+        
+        // 确保字符串正确终止
+        target[n] = '\0';
+        
+        iunlockput(ip);
+        
+        // 解析目标路径
+        if((next = namei(target)) == 0){
+            return 0;
+        }
+        
+        ilock(next);
+        ip = next;
+        depth++;
+    }
+
+    // 检查是否超过最大深度
+    if(depth >= MAX_SYMLINK_DEPTH){
+        if(ip) iunlockput(ip);
+        return 0;
+    }
+
+    return ip;
 }
