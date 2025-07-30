@@ -401,32 +401,41 @@ bmap(struct inode *ip, uint bn)
     return addr;
   }
   bn -= NINDIRECT;
-  //处理双重简洁块
-  if(bn < NDINDIRECT){
-    // 加载双重间接块
-    if((addr = ip->addrs[NDIRECT+1]) == 0)
-      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+  //处理双重间接块
+  if(bn < NDINDIRECT){ 
+    // 预计算索引，避免重复计算
+    uint index1 = bn / NINDIRECT;
+    uint index2 = bn % NINDIRECT;
+    
+    // 分配双间接块（如果需要）
+    if ((addr = ip->addrs[NDIRECT + 1]) == 0) {
+      ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);
+    }
+
+    // 读取双间接块
     bp = bread(ip->dev, addr);
     a = (uint*)bp->data;
-    //计算二级索引 
-    uint first_level =bn / NINDIRECT;
-    uint second_level = bn % NINDIRECT;
-    if((addr = a[first_level]) == 0){
-      a[first_level] = addr = balloc(ip->dev);
+
+    // 分配单间接块（如果需要）
+    if ((addr = a[index1]) == 0) {
+      a[index1] = addr = balloc(ip->dev);
       log_write(bp);
     }
     brelse(bp);
 
-    // 加载第一级间接块，获取最终数据块
+    // 读取单间接块
     bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
-    if((addr = a[second_level]) == 0){
-      a[second_level] = addr = balloc(ip->dev);
+    a = (uint *)bp->data;
+
+    // 分配数据块（如果需要）
+    if ((addr = a[index2]) == 0) {
+      a[index2] = addr = balloc(ip->dev);
       log_write(bp);
     }
     brelse(bp);
     return addr;
   }
+
   panic("bmap: out of range");
 }
 
@@ -436,8 +445,8 @@ void
 itrunc(struct inode *ip)
 {
   int i, j;
-  struct buf *bp, *bp2;
-  uint *a, *a2;
+  struct buf *bp;
+  uint *a;
   //释放直接块
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
@@ -457,29 +466,30 @@ itrunc(struct inode *ip)
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
   }
-  //释放二级间接块
-  if(ip->addrs[NDIRECT+1]){
-    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+  if (ip->addrs[NDIRECT + 1]) {
+    // 读取双间接块
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
     a = (uint*)bp->data;
-    for(i = 0; i < NINDIRECT; i++){
-      if(a[i]){
-        //加载第一级间接块
-        bp2 = bread(ip->dev, a[i]);
-        a2 = (uint*)bp2->data;
-        //释放第二级数据块
-        for(j = 0; j < NINDIRECT; j++){
-          if(a2[j])
-            bfree(ip->dev, a2[j]);
-        }
-        brelse(bp2);
-        // 释放第一级间接块
-        bfree(ip->dev, a[i]);
+
+    for (i = 0; i < NINDIRECT; ++i) {
+      if (a[i] == 0) continue;
+
+      // 读取单间接块
+      struct buf* bp2 = bread(ip->dev, a[i]);
+      uint* b = (uint*)bp2->data;
+      for (j = 0; j < NINDIRECT; ++j) {
+        if (b[j])
+          bfree(ip->dev, b[j]); // 释放数据块
       }
+      brelse(bp2);
+
+      bfree(ip->dev, a[i]); // 释放单间接块
+      a[i] = 0;
     }
     brelse(bp);
-    // 释放二级间接块
-    bfree(ip->dev, ip->addrs[NDIRECT+1]);
-    ip->addrs[NDIRECT+1] = 0;
+
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]); // 释放双间接块
+    ip->addrs[NDIRECT + 1] = 0;
   }
   ip->size = 0;
   iupdate(ip);

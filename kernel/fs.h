@@ -58,4 +58,5 @@ struct dirent {
   ushort inum;
   char name[DIRSIZ];
 };
-
+//最大深度
+#define NSYMLINK 10
